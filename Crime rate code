@@ -1,0 +1,444 @@
+
+#school------
+# Q1: Attainment 8 box plots for 2021/22
+
+library(tidyverse)
+base_folder <- "C:/Users/User/OneDrive/ドキュメント"
+academic_year <- "2021/22"
+
+# Find the two files
+norfolk_zip <- list.files(
+  base_folder,
+  pattern = "^Performancetables_114451.*\\.zip$",
+  recursive = TRUE,
+  full.names = TRUE,
+  ignore.case = TRUE
+)[1]
+
+suffolk_zip <- list.files(
+  base_folder,
+  pattern = "^Performancetables_114530.*\\.zip$",
+  recursive = TRUE,
+  full.names = TRUE,
+  ignore.case = TRUE
+)[1]
+
+if (is.na(norfolk_zip)) {
+  stop("Norfolk ZIP file was not found.")
+}
+
+if (is.na(suffolk_zip)) {
+  stop("Suffolk ZIP file was not found.")
+}
+
+
+# Read the KS4 file for one county
+read_ks4_data <- function(zip_file, county_name) {
+  
+  output_folder <- file.path(
+    tempdir(),
+    paste0("ks4_", county_name)
+  )
+  
+  unlink(output_folder, recursive = TRUE)
+  dir.create(output_folder, recursive = TRUE)
+  
+  unzip(
+    zip_file,
+    exdir = output_folder
+  )
+  
+  csv_files <- list.files(
+    output_folder,
+    pattern = "\\.csv$",
+    recursive = TRUE,
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+  
+  ks4_file <- csv_files[
+    grepl(
+      "ks4.*final\\.csv$",
+      basename(csv_files),
+      ignore.case = TRUE
+    )
+  ][1]
+  
+  if (is.na(ks4_file)) {
+    ks4_file <- csv_files[
+      grepl(
+        "ks4",
+        basename(csv_files),
+        ignore.case = TRUE
+      )
+    ][1]
+  }
+  
+  if (is.na(ks4_file)) {
+    stop(paste("KS4 file was not found for", county_name))
+  }
+  
+  school_data <- read.csv(
+    ks4_file,
+    stringsAsFactors = FALSE,
+    check.names = FALSE,
+    fileEncoding = "UTF-8-BOM"
+  )
+  
+  # Find the Attainment 8 column
+  attainment_column <- grep(
+    "ATT.*8|8.*ATT",
+    names(school_data),
+    value = TRUE,
+    ignore.case = TRUE
+  )[1]
+  
+  # Find the town column
+  town_column <- grep(
+    "^TOWN$|POST.?TOWN|LOCALITY",
+    names(school_data),
+    value = TRUE,
+    ignore.case = TRUE
+  )[1]
+  
+  if (is.na(attainment_column)) {
+    print(
+      names(school_data)[
+        grepl(
+          "ATT|SCORE|8",
+          names(school_data),
+          ignore.case = TRUE
+        )
+      ]
+    )
+    
+    stop(
+      paste(
+        "Attainment 8 column was not found for",
+        county_name
+      )
+    )
+  }
+  
+  if (is.na(town_column)) {
+    print(
+      names(school_data)[
+        grepl(
+          "TOWN|LOCAL|DISTRICT",
+          names(school_data),
+          ignore.case = TRUE
+        )
+      ]
+    )
+    
+    stop(
+      paste(
+        "Town column was not found for",
+        county_name
+      )
+    )
+  }
+  
+  school_data %>%
+    transmute(
+      County = county_name,
+      
+      Town = str_to_title(
+        str_squish(
+          as.character(
+            .data[[town_column]]
+          )
+        )
+      ),
+      
+      Attainment8 = parse_number(
+        as.character(
+          .data[[attainment_column]]
+        ),
+        na = c(
+          "",
+          "NA",
+          "SUPP",
+          "NE",
+          "NP",
+          "."
+        )
+      )
+    ) %>%
+    filter(
+      !is.na(Town),
+      Town != "",
+      !is.na(Attainment8),
+      Attainment8 >= 0,
+      Attainment8 <= 100
+    )
+}
+
+
+# Read both counties
+norfolk_data <- read_ks4_data(
+  norfolk_zip,
+  "Norfolk"
+)
+
+suffolk_data <- read_ks4_data(
+  suffolk_zip,
+  "Suffolk"
+)
+
+# Put the data together
+attainment_data <- bind_rows(
+  norfolk_data,
+  suffolk_data
+)
+
+print(
+  attainment_data %>%
+    count(County, Town)
+)
+
+
+# Norfolk box plot
+norfolk_boxplot <- attainment_data %>%
+  filter(County == "Norfolk") %>%
+  ggplot(
+    aes(
+      x = reorder(
+        Town,
+        Attainment8,
+        median
+      ),
+      y = Attainment8
+    )
+  ) +
+  geom_boxplot(
+    fill = "lightblue"
+  ) +
+  coord_flip() +
+  labs(
+    title = "Average Attainment 8 Score in Norfolk",
+    subtitle = paste("Academic year", academic_year),
+    x = "Town",
+    y = "Average Attainment 8 score"
+  ) +
+  theme_minimal()
+
+
+# Suffolk box plot
+suffolk_boxplot <- attainment_data %>%
+  filter(County == "Suffolk") %>%
+  ggplot(
+    aes(
+      x = reorder(
+        Town,
+        Attainment8,
+        median
+      ),
+      y = Attainment8
+    )
+  ) +
+  geom_boxplot(
+    fill = "lightgreen"
+  ) +
+  coord_flip() +
+  labs(
+    title = "Average Attainment 8 Score in Suffolk",
+    subtitle = paste("Academic year", academic_year),
+    x = "Town",
+    y = "Average Attainment 8 score"
+  ) +
+  theme_minimal()
+
+
+# Save the plots
+ggsave(
+  file.path(
+    base_folder,
+    "Norfolk_Attainment8_2021_22.png"
+  ),
+  plot = norfolk_boxplot,
+  width = 10,
+  height = 8,
+  dpi = 300
+)
+
+ggsave(
+  file.path(
+    base_folder,
+    "Suffolk_Attainment8_2021_22.png"
+  ),
+  plot = suffolk_boxplot,
+  width = 10,
+  height = 8,
+  dpi = 300
+)
+
+
+# Show the plots
+print(norfolk_boxplot)
+print(suffolk_boxplot)
+
+# Average Attainment 8 score by district from 2021/22 to 2024/25
+
+library(tidyverse)
+
+base_folder <- "C:/Users/User/OneDrive/ドキュメント"
+
+# Download the official district-level KS4 data
+data_url <- paste0(
+  "https://api.education.gov.uk/statistics/v1/data-sets/",
+  "18e39901-e1a0-3b70-aeae-b3fe542fcf1c/csv"
+)
+ks4_data <- read_csv(
+  data_url,
+  col_types = cols(.default = col_character()),
+  show_col_types = FALSE
+)
+
+# Districts in both counties
+norfolk_districts <- c(
+  "Breckland",
+  "Broadland",
+  "Great Yarmouth",
+  "King's Lynn and West Norfolk",
+  "North Norfolk",
+  "Norwich",
+  "South Norfolk"
+)
+
+suffolk_districts <- c(
+  "Babergh",
+  "East Suffolk",
+  "Ipswich",
+  "Mid Suffolk",
+  "West Suffolk"
+)
+
+# Keep the total Attainment 8 results
+district_attainment <- ks4_data %>%
+  filter(
+    geographic_level == "Local authority district",
+    geography_basis == "School location",
+    establishment_type_group == "All state-funded",
+    breakdown_topic == "Total",
+    breakdown == "Total",
+    disadvantage_status == "Total",
+    fsm_status == "Total",
+    time_period %in% c(
+      "202122",
+      "202223",
+      "202324",
+      "202425"
+    ),
+    lad_name %in% c(
+      norfolk_districts,
+      suffolk_districts
+    )
+  ) %>%
+  transmute(
+    District = lad_name,
+    
+    County = case_when(
+      District %in% norfolk_districts ~ "Norfolk",
+      District %in% suffolk_districts ~ "Suffolk"
+    ),
+    
+    AcademicYear = case_when(
+      time_period == "202122" ~ "2021/22",
+      time_period == "202223" ~ "2022/23",
+      time_period == "202324" ~ "2023/24",
+      time_period == "202425" ~ "2024/25"
+    ),
+    
+    Average_Attainment8 = suppressWarnings(
+      parse_number(attainment8_average)
+    )
+  ) %>%
+  filter(
+    !is.na(Average_Attainment8)
+  ) %>%
+  mutate(
+    AcademicYear = factor(
+      AcademicYear,
+      levels = c(
+        "2021/22",
+        "2022/23",
+        "2023/24",
+        "2024/25"
+      )
+    )
+  )
+
+print(district_attainment)
+
+# Norfolk line chart
+norfolk_chart <- district_attainment %>%
+  filter(County == "Norfolk") %>%
+  ggplot(
+    aes(
+      x = AcademicYear,
+      y = Average_Attainment8,
+      colour = District,
+      group = District
+    )
+  ) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Average Attainment 8 Score by District in Norfolk",
+    subtitle = "Academic years 2021/22 to 2024/25",
+    x = "Academic year",
+    y = "Average Attainment 8 score",
+    colour = "District"
+  ) +
+  theme_minimal()
+
+# Suffolk line chart
+suffolk_chart <- district_attainment %>%
+  filter(County == "Suffolk") %>%
+  ggplot(
+    aes(
+      x = AcademicYear,
+      y = Average_Attainment8,
+      colour = District,
+      group = District
+    )
+  ) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Average Attainment 8 Score by District in Suffolk",
+    subtitle = "Academic years 2021/22 to 2024/25",
+    x = "Academic year",
+    y = "Average Attainment 8 score",
+    colour = "District"
+  ) +
+  theme_minimal()
+
+# Save the charts
+ggsave(
+  file.path(
+    base_folder,
+    "Norfolk_Attainment8_2021_2025.png"
+  ),
+  plot = norfolk_chart,
+  width = 11,
+  height = 7,
+  dpi = 300
+)
+
+ggsave(
+  file.path(
+    base_folder,
+    "Suffolk_Attainment8_2021_2025.png"
+  ),
+  plot = suffolk_chart,
+  width = 11,
+  height = 7,
+  dpi = 300
+)
+
+# Show the charts
+print(norfolk_chart)
+print(suffolk_chart)
+
