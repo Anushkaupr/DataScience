@@ -1,0 +1,302 @@
+# House price analysis---------
+
+library(tidyverse)
+library(scales)
+
+base_folder <- "C:/Users/User/OneDrive/ドキュメント"
+
+# Column names used in the Land Registry files
+column_names <- c(
+  "transaction_id", "price", "date", "postcode",
+  "property_type", "old_new", "duration", "paon",
+  "saon", "street", "locality", "town",
+  "district", "county", "category", "record_status"
+)
+
+# Read the files from 2021 to 2025
+house_data_2021_2025 <- map_dfr(
+  2021:2025,
+  function(current_year) {
+    
+    file_name <- file.path(
+      base_folder,
+      paste0("pp-", current_year, ".csv")
+    )
+    
+    if (!file.exists(file_name)) {
+      stop(paste("File not found:", file_name))
+    }
+    
+    read_csv(
+      file_name,
+      col_names = column_names,
+      col_types = cols(
+        .default = col_character(),
+        price = col_double()
+      ),
+      show_col_types = FALSE
+    ) %>%
+      mutate(
+        year = current_year,
+        county = str_to_upper(str_squish(county)),
+        district = str_to_title(str_squish(district))
+      )
+  }
+)
+
+# Keep Norfolk and Suffolk records
+house_data_2021_2025 <- house_data_2021_2025 %>%
+  filter(
+    county %in% c("NORFOLK", "SUFFOLK"),
+    !is.na(price),
+    price > 0,
+    !is.na(district),
+    district != ""
+  )
+
+# 2024 average house price for each district
+district_average <- house_data_2021_2025 %>%
+  filter(year == 2024) %>%
+  group_by(county, district) %>%
+  summarise(
+    average_price = mean(price, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(district_average)
+
+# Yearly average house price for each county
+yearly_average <- house_data_2021_2025 %>%
+  group_by(county, year) %>%
+  summarise(
+    average_price = mean(price, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(yearly_average)
+
+
+# Norfolk box plot
+norfolk_boxplot <- district_average %>%
+  filter(county == "NORFOLK") %>%
+  ggplot(
+    aes(
+      x = county,
+      y = average_price
+    )
+  ) +
+  geom_boxplot() +
+  geom_jitter(
+    width = 0.10,
+    size = 2
+  ) +
+  scale_y_continuous(
+    labels = label_currency(
+      prefix = "£",
+      accuracy = 1
+    )
+  ) +
+  labs(
+    title = "Average House Prices in Norfolk Districts, 2024",
+    x = "Norfolk",
+    y = "Average district house price"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+
+print(norfolk_boxplot)
+
+
+# Suffolk box plot
+suffolk_boxplot <- district_average %>%
+  filter(county == "SUFFOLK") %>%
+  ggplot(
+    aes(
+      x = county,
+      y = average_price
+    )
+  ) +
+  geom_boxplot() +
+  geom_jitter(
+    width = 0.10,
+    size = 2
+  ) +
+  scale_y_continuous(
+    labels = label_currency(
+      prefix = "£",
+      accuracy = 1
+    )
+  ) +
+  labs(
+    title = "Average House Prices in Suffolk Districts, 2024",
+    x = "Suffolk",
+    y = "Average district house price"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+
+print(suffolk_boxplot)
+
+# Norfolk bar chart
+norfolk_barchart <- district_average %>%
+  filter(county == "NORFOLK") %>%
+  ggplot(
+    aes(
+      x = reorder(district, average_price),
+      y = average_price
+    )
+  ) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::label_currency(
+      prefix = "£",
+      big.mark = ",",
+      accuracy = 1
+    )
+  ) +
+  labs(
+    title = "Average House Prices by District in Norfolk, 2024",
+    x = "District",
+    y = "Average house price"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+
+print(norfolk_barchart)
+
+ggsave(
+  "norfolk_barchart.png",
+  plot = norfolk_barchart,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+# Suffolk bar chart
+suffolk_barchart <- district_average %>%
+  filter(county == "SUFFOLK") %>%
+  ggplot(
+    aes(
+      x = reorder(district, average_price),
+      y = average_price
+    )
+  ) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::label_currency(
+      prefix = "£",
+      big.mark = ",",
+      accuracy = 1
+    )
+  ) +
+  labs(
+    title = "Average House Prices by District in Suffolk, 2024",
+    x = "District",
+    y = "Average house price"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+
+print(suffolk_barchart)
+
+ggsave(
+  "suffolk_barchart.png",
+  plot = suffolk_barchart,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+# Norfolk line chart
+norfolk_linechart <- yearly_average %>%
+  filter(county == "NORFOLK") %>%
+  ggplot(
+    aes(
+      x = year,
+      y = average_price
+    )
+  ) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  scale_x_continuous(
+    breaks = 2021:2025
+  ) +
+  scale_y_continuous(
+    labels = label_currency(
+      prefix = "£",
+      big.mark = ",",
+      accuracy = 1
+    )
+  ) +
+  labs(
+    title = "Average House Prices in Norfolk, 2021-2025",
+    x = "Year",
+    y = "Average house price"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+
+print(norfolk_linechart)
+
+ggsave(
+  "norfolk_linechart.png",
+  plot = norfolk_linechart,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+# Suffolk line chart
+suffolk_linechart <- yearly_average %>%
+  filter(county == "SUFFOLK") %>%
+  ggplot(
+    aes(
+      x = year,
+      y = average_price
+    )
+  ) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  scale_x_continuous(
+    breaks = 2021:2025
+  ) +
+  scale_y_continuous(
+    labels = label_currency(
+      prefix = "£",
+      big.mark = ",",
+      accuracy = 1
+    )
+  ) +
+  labs(
+    title = "Average House Prices in Suffolk, 2021-2025",
+    x = "Year",
+    y = "Average house price"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+
+print(suffolk_linechart)
+
+ggsave(
+  "suffolk_linechart.png",
+  plot = suffolk_linechart,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
