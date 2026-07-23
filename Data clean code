@@ -1,0 +1,57 @@
+
+#data cleaning------
+#house price 
+# Keep Norfolk and Suffolk records
+house_data <- house_data %>%
+  filter(county %in% c("NORFOLK", "SUFFOLK")) %>%
+  filter(!is.na(price), price > 0) %>%
+  mutate(
+    county = str_to_upper(str_squish(county)),
+    district = str_to_title(str_squish(district))
+  )
+
+#crime
+crime_data <- crime_data %>%
+  mutate(
+    Date = ymd(paste0(Month, "-01")),
+    District = str_remove(`LSOA name`, "\\s+[0-9]{3}[A-Z]$")
+  ) %>%
+  filter(
+    !is.na(Date),
+    !is.na(District),
+    District != ""
+  )
+
+#postcode
+clean_postcode <- function(x) {
+  str_to_upper(
+    str_remove_all(as.character(x), "[^A-Z0-9]")
+  )
+}
+
+#school
+school_data <- school_data %>%
+  mutate(
+    Attainment8 = parse_number(
+      Attainment8,
+      na = c("", "SUPP", "NE", "NP", ".")
+    )
+  ) %>%
+  filter(!is.na(Attainment8))
+
+#broadband speed
+perf <- perf %>%
+  mutate(
+    AverageDownload = parse_number(
+      as.character(Average.download.speed..Mbit.s.),
+      na = c("", "NA", "N/A", ".")
+    ),
+    MaximumDownload = parse_number(
+      as.character(Maximum.download.speed..Mbit.s.),
+      na = c("", "NA", "N/A", ".")
+    )
+  ) %>%
+  filter(
+    !is.na(AverageDownload),
+    !is.na(MaximumDownload)
+  )
