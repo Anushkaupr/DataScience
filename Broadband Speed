@@ -1,0 +1,313 @@
+# Broadband speed analysis-------
+# Questions 1 and 2
+
+library(tidyverse)
+
+base_folder <- "C:/Users/User/OneDrive/ドキュメント"
+
+# Load broadband performance data
+perf <- read.csv(
+  file.path(
+    base_folder,
+    "201805_fixed_pc_performance_r03.csv"
+  ),
+  stringsAsFactors = FALSE
+)
+
+# Clean broadband speed data
+perf <- perf %>%
+  mutate(
+    Average.download.speed..Mbit.s. = parse_number(
+      as.character(
+        Average.download.speed..Mbit.s.
+      ),
+      na = c(
+        "",
+        "NA",
+        "N/A",
+        "."
+      )
+    ),
+    
+    Maximum.download.speed..Mbit.s. = parse_number(
+      as.character(
+        Maximum.download.speed..Mbit.s.
+      ),
+      na = c(
+        "",
+        "NA",
+        "N/A",
+        "."
+      )
+    ),
+    
+    postcode.area = str_to_upper(
+      str_squish(postcode.area)
+    ),
+    
+    postcode_space = str_to_upper(
+      str_squish(postcode_space)
+    )
+  ) %>%
+  filter(
+    !is.na(postcode.area),
+    !is.na(postcode_space),
+    postcode_space != "",
+    !is.na(Average.download.speed..Mbit.s.),
+    !is.na(Maximum.download.speed..Mbit.s.)
+  )
+
+
+# Keep Norfolk and Suffolk postcode areas
+nf_sf <- perf %>%
+  filter(
+    postcode.area %in% c(
+      "NR",
+      "IP"
+    )
+  ) %>%
+  mutate(
+    County = case_when(
+      postcode.area == "NR" ~ "NORFOLK",
+      postcode.area == "IP" ~ "SUFFOLK"
+    ),
+    
+    # Extract the outward postcode district
+    District = sub(
+      " .*",
+      "",
+      postcode_space
+    )
+  ) %>%
+  filter(
+    !is.na(District),
+    District != ""
+  )
+
+
+# Question 1
+# Calculate average download speed for each postcode district
+district_avg <- nf_sf %>%
+  group_by(
+    County,
+    District
+  ) %>%
+  summarise(
+    AvgDownload = mean(
+      Average.download.speed..Mbit.s.,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
+
+print(district_avg)
+
+
+# Norfolk box plot
+norfolk_speed_boxplot <- district_avg %>%
+  filter(
+    County == "NORFOLK"
+  ) %>%
+  ggplot(
+    aes(
+      x = County,
+      y = AvgDownload
+    )
+  ) +
+  geom_boxplot() +
+  geom_jitter(
+    width = 0.10,
+    size = 2
+  ) +
+  labs(
+    title = "Average Download Speed by District in Norfolk",
+    x = "Norfolk",
+    y = "Average download speed (Mbit/s)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(
+      face = "bold"
+    )
+  )
+
+print(norfolk_speed_boxplot)
+
+# ggsave(
+  # file.path(
+    base_folder,
+    "Norfolk_broadband_boxplot.png"
+  ),
+  plot = norfolk_speed_boxplot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+# Suffolk box plot
+suffolk_speed_boxplot <- district_avg %>%
+  filter(
+    County == "SUFFOLK"
+  ) %>%
+  ggplot(
+    aes(
+      x = County,
+      y = AvgDownload
+    )
+  ) +
+  geom_boxplot() +
+  geom_jitter(
+    width = 0.10,
+    size = 2
+  ) +
+  labs(
+    title = "Average Download Speed by District in Suffolk",
+    x = "Suffolk",
+    y = "Average download speed (Mbit/s)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(
+      face = "bold"
+    )
+  )
+
+print(suffolk_speed_boxplot)
+
+ggsave(
+  file.path(
+    base_folder,
+    "Suffolk_broadband_boxplot.png"
+  ),
+  plot = suffolk_speed_boxplot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+# Question 2
+# Calculate average and maximum download speed by postcode district
+district_speed <- nf_sf %>%
+  group_by(
+    County,
+    District
+  ) %>%
+  summarise(
+    `Average download speed` = mean(
+      Average.download.speed..Mbit.s.,
+      na.rm = TRUE
+    ),
+    
+    `Maximum download speed` = mean(
+      Maximum.download.speed..Mbit.s.,
+      na.rm = TRUE
+    ),
+    
+    .groups = "drop"
+  ) %>%
+  pivot_longer(
+    cols = c(
+      `Average download speed`,
+      `Maximum download speed`
+    ),
+    names_to = "Speed_Type",
+    values_to = "Download_Speed"
+  )
+
+print(district_speed)
+
+
+# Norfolk bar chart
+norfolk_speed_barchart <- district_speed %>%
+  filter(
+    County == "NORFOLK"
+  ) %>%
+  ggplot(
+    aes(
+      x = reorder(
+        District,
+        Download_Speed
+      ),
+      y = Download_Speed,
+      fill = Speed_Type
+    )
+  ) +
+  geom_col(
+    position = "dodge"
+  ) +
+  coord_flip() +
+  labs(
+    title = "Average and Maximum Download Speed in Norfolk",
+    x = "Postcode district",
+    y = "Download speed (Mbit/s)",
+    fill = "Speed type"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(
+      face = "bold"
+    )
+  )
+
+print(norfolk_speed_barchart)
+
+ggsave(
+  file.path(
+    base_folder,
+    "Norfolk_broadband_barchart.png"
+  ),
+  plot = norfolk_speed_barchart,
+  width = 9,
+  height = 7,
+  dpi = 300
+)
+
+
+# Suffolk bar chart
+suffolk_speed_barchart <- district_speed %>%
+  filter(
+    County == "SUFFOLK"
+  ) %>%
+  ggplot(
+    aes(
+      x = reorder(
+        District,
+        Download_Speed
+      ),
+      y = Download_Speed,
+      fill = Speed_Type
+    )
+  ) +
+  geom_col(
+    position = "dodge"
+  ) +
+  coord_flip() +
+  labs(
+    title = "Average and Maximum Download Speed in Suffolk",
+    x = "Postcode district",
+    y = "Download speed (Mbit/s)",
+    fill = "Speed type"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(
+      face = "bold"
+    )
+  )
+
+print(suffolk_speed_barchart)
+
+ggsave(
+  file.path(
+    base_folder,
+    "Suffolk_broadband_barchart.png"
+  ),
+  plot = suffolk_speed_barchart,
+  width = 9,
+  height = 7,
+  dpi = 300
+)
