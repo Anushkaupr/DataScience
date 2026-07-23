@@ -1,0 +1,1311 @@
+# Crime rate------
+#ques 1
+library(tidyverse)
+library(lubridate)
+
+# Select the ZIP file itself
+crime_zip <- file.choose()
+
+# Extract the ZIP
+crime_folder <- tempfile("crime_data_")
+dir.create(crime_folder)
+
+unzip(
+  crime_zip,
+  exdir = crime_folder
+)
+
+# all CSV files inside the ZIP
+all_csv_files <- list.files(
+  crime_folder,
+  pattern = "\\.csv$",
+  recursive = TRUE,
+  full.names = TRUE,
+  ignore.case = TRUE
+)
+
+# Keep Norfolk and Suffolk street-crime files
+crime_files <- all_csv_files[
+  str_detect(
+    str_to_lower(all_csv_files),
+    "norfolk|suffolk"
+  ) &
+    str_detect(
+      str_to_lower(basename(all_csv_files)),
+      "street\\.csv$"
+    )
+]
+
+# Check files
+print(length(crime_files))
+print(head(crime_files))
+
+if (length(crime_files) == 0) {
+  stop("No Norfolk or Suffolk street-crime files were found.")
+}
+
+# Read and combine the crime files
+crime_data <- map_dfr(
+  crime_files,
+  function(file) {
+    read_csv(
+      file,
+      col_types = cols(.default = col_character()),
+      show_col_types = FALSE
+    ) %>%
+      select(
+        Month,
+        `LSOA name`,
+        `Crime type`
+      ) %>%
+      mutate(Source_File = file)
+  }
+) %>%
+  mutate(
+    Date = ymd(paste0(Month, "-01")),
+    
+    County = case_when(
+      str_detect(
+        Source_File,
+        regex("norfolk", ignore_case = TRUE)
+      ) ~ "NORFOLK",
+      
+      str_detect(
+        Source_File,
+        regex("suffolk", ignore_case = TRUE)
+      ) ~ "SUFFOLK"
+    ),
+    
+    District = str_remove(
+      `LSOA name`,
+      "\\s+[0-9]{3}[A-Z]$"
+    )
+  ) %>%
+  filter(
+    !is.na(Date),
+    !is.na(County),
+    !is.na(District),
+    District != ""
+  )
+
+# Confirm successful import
+table(crime_data$County)
+range(crime_data$Date)
+
+burglary_2024 <- crime_data %>%
+  filter(
+    year(Date) == 2024,
+    `Crime type` == "Burglary"
+  ) %>%
+  count(
+    County,
+    District,
+    Date,
+    name = "Burglary_Count"
+  ) %>%
+  group_by(
+    County,
+    District
+  ) %>%
+  complete(
+    Date = seq(
+      as.Date("2024-01-01"),
+      as.Date("2024-12-01"),
+      by = "month"
+    ),
+    fill = list(Burglary_Count = 0)
+  ) %>%
+  ungroup()
+
+norfolk_crime_boxplot <- burglary_2024 %>%
+  filter(County == "NORFOLK") %>%
+  ggplot(
+    aes(
+      x = reorder(District, Burglary_Count, FUN = median),
+      y = Burglary_Count
+    )
+  ) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(
+    title = "Monthly Burglary by District in Norfolk, 2024",
+    x = "District",
+    y = "Monthly number of burglaries"
+  ) +
+  theme_minimal()
+
+print(norfolk_crime_boxplot)
+
+
+# Suffolk box plot
+suffolk_crime_boxplot <- burglary_2024 %>%
+  filter(County == "SUFFOLK") %>%
+  ggplot(
+    aes(
+      x = reorder(District, Burglary_Count, FUN = median),
+      y = Burglary_Count
+    )
+  ) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(
+    title = "Monthly Burglary by District in Suffolk, 2024",
+    x = "District",
+    y = "Monthly number of burglaries"
+  ) +
+  theme_minimal()
+
+print(suffolk_crime_boxplot)
+
+# Q2: Vehicle crime rate per 10,000 people – January 2024
+# Load the packages
+library(dplyr)
+if (!requireNamespace("fmsb", quietly = TRUE)) {
+  install.packages("fmsb")
+}
+library(fmsb)
+
+
+# Folder where all the files are saved
+base_folder <- "C:/Users/User/OneDrive/ドキュメント"
+
+
+# Districts included in the analysis
+norfolk_districts <- c(
+  "Breckland",
+  "Broadland",
+  "Great Yarmouth",
+  "King's Lynn and West Norfolk",
+  "North Norfolk",
+  "Norwich",
+  "South Norfolk"
+)
+
+suffolk_districts <- c(
+  "Babergh",
+  "East Suffolk",
+  "Ipswich",
+  "Mid Suffolk",
+  "West Suffolk"
+)
+
+district_info <- data.frame(
+  District = c(
+    norfolk_districts,
+    suffolk_districts
+  ),
+  County = c(
+    rep("NORFOLK", length(norfolk_districts)),
+    rep("SUFFOLK", length(suffolk_districts))
+  )
+)
+
+target_districts <- district_info$District
+
+
+# Find all the files inside the Documents folder
+all_files <- list.files(
+  base_folder,
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+
+# Find the population file
+population_file <- all_files[
+  grepl(
+    "^Population2011.*\\.csv$",
+    basename(all_files),
+    ignore.case = TRUE
+  )
+][1]
+
+
+# Find the crime ZIP file
+crime_zip <- all_files[
+  grepl(
+    "^427a01f6c4d0f343ed1cb89053d0361e3caa0cd3.*\\.zip$",
+    basename(all_files),
+    ignore.case = TRUE
+  )
+][1]
+
+
+# Check whether the postcode lookup CSV is already available
+lookup_file <- all_files[
+  grepl(
+    "^NSP21CL_MAY24_UK_LU.*\\.csv$",
+    basename(all_files),
+    ignore.case = TRUE
+  )
+][1]
+
+
+# Stop the code if the required files cannot be found
+if (is.na(population_file)) {
+  stop("Population file not found.")
+}
+
+if (is.na(crime_zip)) {
+  stop("Crime ZIP file not found.")
+}
+
+
+# Unzip the postcode lookup if the CSV is not already available
+if (is.na(lookup_file)) {
+  
+  lookup_zip <- all_files[
+    grepl(
+      "^NSP21CL_MAY24_UK_LU.*\\.zip$",
+      basename(all_files),
+      ignore.case = TRUE
+    )
+  ][1]
+  
+  if (is.na(lookup_zip)) {
+    stop("Postcode lookup ZIP file not found.")
+  }
+  
+  lookup_folder <- file.path(
+    tempdir(),
+    "postcode_lookup"
+  )
+  
+  unlink(
+    lookup_folder,
+    recursive = TRUE
+  )
+  
+  dir.create(
+    lookup_folder,
+    recursive = TRUE
+  )
+  
+  unzip(
+    lookup_zip,
+    exdir = lookup_folder
+  )
+  
+  lookup_csvs <- list.files(
+    lookup_folder,
+    pattern = "\\.csv$",
+    recursive = TRUE,
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+  
+  
+  # Some downloads contain another ZIP file inside the main ZIP
+  if (length(lookup_csvs) == 0) {
+    
+    nested_zips <- list.files(
+      lookup_folder,
+      pattern = "\\.zip$",
+      recursive = TRUE,
+      full.names = TRUE,
+      ignore.case = TRUE
+    )
+    
+    for (i in seq_along(nested_zips)) {
+      
+      nested_folder <- file.path(
+        lookup_folder,
+        paste0("nested_", i)
+      )
+      
+      dir.create(
+        nested_folder,
+        recursive = TRUE
+      )
+      
+      unzip(
+        nested_zips[i],
+        exdir = nested_folder
+      )
+    }
+    
+    lookup_csvs <- list.files(
+      lookup_folder,
+      pattern = "\\.csv$",
+      recursive = TRUE,
+      full.names = TRUE,
+      ignore.case = TRUE
+    )
+  }
+  
+  if (length(lookup_csvs) == 0) {
+    stop("No postcode lookup CSV found.")
+  }
+  
+  selected_lookup <- lookup_csvs[
+    grepl(
+      "NSP21CL",
+      basename(lookup_csvs),
+      ignore.case = TRUE
+    )
+  ]
+  
+  if (length(selected_lookup) > 0) {
+    lookup_file <- selected_lookup[1]
+  } else {
+    lookup_file <- lookup_csvs[1]
+  }
+}
+
+
+# Function for changing a full postcode into a postcode sector
+make_sector <- function(x) {
+  
+  x <- toupper(
+    trimws(
+      gsub("\\s+", " ", x)
+    )
+  )
+  
+  outward <- sub(
+    "\\s.*$",
+    "",
+    x
+  )
+  
+  inward <- sub(
+    "^.*\\s",
+    "",
+    x
+  )
+  
+  paste(
+    outward,
+    substr(inward, 1, 1)
+  )
+}
+
+
+# Read the postcode lookup data
+lu <- read.csv(
+  lookup_file,
+  stringsAsFactors = FALSE
+)
+
+names(lu) <- tolower(names(lu))
+
+
+# Find the postcode and district columns
+postcode_column <- intersect(
+  c(
+    "pcds",
+    "pcd8",
+    "pcd7",
+    "pcd",
+    "postcode"
+  ),
+  names(lu)
+)[1]
+
+district_column <- grep(
+  "^lad.*nm$",
+  names(lu),
+  value = TRUE
+)[1]
+
+if (
+  is.na(postcode_column) ||
+  is.na(district_column)
+) {
+  stop("Postcode or district column not found in lookup.")
+}
+
+
+# Keep only the districts needed for this analysis
+lu_target <- lu %>%
+  transmute(
+    Postcode = .data[[postcode_column]],
+    District = .data[[district_column]]
+  ) %>%
+  filter(
+    District %in% target_districts
+  )
+
+lu_target$Sector <- make_sector(
+  lu_target$Postcode
+)
+
+
+# Match each postcode sector with its most common district
+sector_lad <- aggregate(
+  District ~ Sector,
+  data = lu_target,
+  FUN = function(x) {
+    names(
+      sort(
+        table(x),
+        decreasing = TRUE
+      )
+    )[1]
+  }
+)
+
+
+# Read the population data
+pop <- read.csv(
+  population_file,
+  stringsAsFactors = FALSE
+)
+
+names(pop) <- tolower(names(pop))
+
+
+# Find the postcode and population columns
+pop_postcode_column <- grep(
+  "^postcode$|^pcds$|^pcd$",
+  names(pop),
+  value = TRUE
+)[1]
+
+pop_population_column <- grep(
+  "^population$|usual.*resident|all.*person",
+  names(pop),
+  value = TRUE
+)[1]
+
+if (
+  is.na(pop_postcode_column) ||
+  is.na(pop_population_column)
+) {
+  stop("Population columns not found.")
+}
+
+
+# Prepare the postcode-sector population data
+population_data <- pop %>%
+  transmute(
+    Sector = make_sector(
+      .data[[pop_postcode_column]]
+    ),
+    Population = as.numeric(
+      gsub(
+        "[^0-9.-]",
+        "",
+        .data[[pop_population_column]]
+      )
+    )
+  ) %>%
+  filter(
+    !is.na(Population)
+  )
+
+
+# Match population records with districts
+merged_pop <- merge(
+  population_data,
+  sector_lad,
+  by = "Sector"
+)
+
+
+# Calculate the total population of each district
+district_pop <- merged_pop %>%
+  group_by(District) %>%
+  summarise(
+    Population = sum(
+      Population,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  )
+
+
+# Unzip the crime data
+crime_folder <- file.path(
+  tempdir(),
+  "crime_q2"
+)
+
+unlink(
+  crime_folder,
+  recursive = TRUE
+)
+
+dir.create(
+  crime_folder,
+  recursive = TRUE
+)
+
+unzip(
+  crime_zip,
+  exdir = crime_folder
+)
+
+
+# Find all crime CSV files
+crime_files <- list.files(
+  crime_folder,
+  pattern = "\\.csv$",
+  recursive = TRUE,
+  full.names = TRUE,
+  ignore.case = TRUE
+)
+
+
+# Find the January 2024 Norfolk crime file
+norfolk_file <- crime_files[
+  grepl(
+    "2024-01-norfolk-street\\.csv$",
+    basename(crime_files),
+    ignore.case = TRUE
+  )
+][1]
+
+
+# Find the January 2024 Suffolk crime file
+suffolk_file <- crime_files[
+  grepl(
+    "2024-01-suffolk-street\\.csv$",
+    basename(crime_files),
+    ignore.case = TRUE
+  )
+][1]
+
+if (
+  is.na(norfolk_file) ||
+  is.na(suffolk_file)
+) {
+  stop("January 2024 crime files not found.")
+}
+
+
+# Read the Norfolk and Suffolk crime data
+norfolk_crime <- read.csv(
+  norfolk_file,
+  stringsAsFactors = FALSE
+)
+
+suffolk_crime <- read.csv(
+  suffolk_file,
+  stringsAsFactors = FALSE
+)
+
+
+# Combine both counties into one dataset
+crime <- rbind(
+  norfolk_crime,
+  suffolk_crime
+)
+
+
+# Get the district name from the LSOA name
+crime$District <- sub(
+  "\\s+[0-9]{3}[A-Z]$",
+  "",
+  crime$LSOA.name
+)
+
+crime$District <- gsub(
+  "’",
+  "'",
+  crime$District
+)
+
+
+# Replace the older Suffolk district names
+crime$District[
+  crime$District %in% c(
+    "Suffolk Coastal",
+    "Waveney"
+  )
+] <- "East Suffolk"
+
+crime$District[
+  crime$District %in% c(
+    "Forest Heath",
+    "St Edmundsbury"
+  )
+] <- "West Suffolk"
+
+
+# Count vehicle crimes in each district
+vehicle_counts <- crime %>%
+  filter(
+    Crime.type == "Vehicle crime",
+    District %in% target_districts
+  ) %>%
+  group_by(District) %>%
+  summarise(
+    Count = n(),
+    .groups = "drop"
+  )
+
+
+# Combine the population and crime data
+merged <- district_info %>%
+  left_join(
+    district_pop,
+    by = "District"
+  ) %>%
+  left_join(
+    vehicle_counts,
+    by = "District"
+  ) %>%
+  mutate(
+    Count = ifelse(
+      is.na(Count),
+      0,
+      Count
+    ),
+    Rate10k = (
+      Count / Population
+    ) * 10000
+  ) %>%
+  filter(
+    !is.na(Population),
+    Population > 0
+  )
+
+print(merged)
+
+
+# Function for creating the radar chart
+create_radar <- function(
+    data,
+    county_name,
+    title_text,
+    line_colour,
+    fill_colour
+) {
+  
+  county_data <- data %>%
+    filter(
+      County == county_name
+    ) %>%
+    arrange(District)
+  
+  values <- county_data$Rate10k
+  names(values) <- county_data$District
+  
+  if (length(values) < 3) {
+    stop(
+      paste(
+        "Insufficient data for",
+        county_name
+      )
+    )
+  }
+  
+  maximum_value <- max(
+    c(values, 1),
+    na.rm = TRUE
+  )
+  
+  radar_data <- as.data.frame(
+    rbind(
+      Maximum = rep(
+        maximum_value * 1.1,
+        length(values)
+      ),
+      Minimum = rep(
+        0,
+        length(values)
+      ),
+      Rate = values
+    )
+  )
+  
+  colnames(radar_data) <- names(values)
+  
+  radarchart(
+    radar_data,
+    axistype = 1,
+    pcol = line_colour,
+    pfcol = adjustcolor(
+      fill_colour,
+      alpha.f = 0.3
+    ),
+    plwd = 2,
+    vlcex = 0.7,
+    title = title_text
+  )
+}
+
+
+# Save the Norfolk radar chart
+png(
+  file.path(
+    base_folder,
+    "Norfolk_vehicle_crime_Jan2024.png"
+  ),
+  width = 1400,
+  height = 1100,
+  res = 160
+)
+
+create_radar(
+  merged,
+  "NORFOLK",
+  "Vehicle Crime Rate per 10,000 People - Norfolk (Jan 2024)",
+  "darkred",
+  "red"
+)
+
+dev.off()
+
+
+# Save the Suffolk radar chart
+png(
+  file.path(
+    base_folder,
+    "Suffolk_vehicle_crime_Jan2024.png"
+  ),
+  width = 1400,
+  height = 1100,
+  res = 160
+)
+
+create_radar(
+  merged,
+  "SUFFOLK",
+  "Vehicle Crime Rate per 10,000 People - Suffolk (Jan 2024)",
+  "darkblue",
+  "blue"
+)
+
+dev.off()
+
+
+# Show the Norfolk chart in the RStudio Plots window
+create_radar(
+  merged,
+  "NORFOLK",
+  "Vehicle Crime Rate per 10,000 People - Norfolk (Jan 2024)",
+  "darkred",
+  "red"
+)
+
+# Q3: Drug offence rate from June 2023 to April 2026
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+base_folder <- "C:/Users/User/OneDrive/ドキュメント"
+
+# Districts used in the study
+norfolk_districts <- c(
+  "Breckland", "Broadland", "Great Yarmouth",
+  "King's Lynn and West Norfolk", "North Norfolk",
+  "Norwich", "South Norfolk"
+)
+
+suffolk_districts <- c(
+  "Babergh", "East Suffolk", "Ipswich",
+  "Mid Suffolk", "West Suffolk"
+)
+
+district_info <- data.frame(
+  District = c(norfolk_districts, suffolk_districts),
+  County = c(
+    rep("NORFOLK", length(norfolk_districts)),
+    rep("SUFFOLK", length(suffolk_districts))
+  )
+)
+
+target_districts <- district_info$District
+
+# Look for the files in the Documents folder
+all_files <- list.files(
+  base_folder,
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+population_file <- all_files[
+  grepl(
+    "^Population2011.*\\.csv$",
+    basename(all_files),
+    ignore.case = TRUE
+  )
+][1]
+
+crime_zip <- all_files[
+  grepl(
+    "^427a01f6c4d0f343ed1cb89053d0361e3caa0cd3.*\\.zip$",
+    basename(all_files),
+    ignore.case = TRUE
+  )
+][1]
+
+lookup_file <- all_files[
+  grepl(
+    "(NSP21CL|PCD_OA21).*\\.csv$",
+    basename(all_files),
+    ignore.case = TRUE
+  )
+][1]
+
+if (is.na(population_file)) {
+  stop("Population file not found.")
+}
+
+if (is.na(crime_zip)) {
+  stop("Crime ZIP file not found.")
+}
+
+# Unzip the postcode lookup if only the ZIP file is available
+if (is.na(lookup_file)) {
+  
+  lookup_zip <- all_files[
+    grepl(
+      "(NSP21CL|PCD_OA21).*\\.zip$",
+      basename(all_files),
+      ignore.case = TRUE
+    )
+  ][1]
+  
+  if (is.na(lookup_zip)) {
+    stop("Postcode lookup file not found.")
+  }
+  
+  lookup_folder <- file.path(
+    tempdir(),
+    "postcode_lookup_q3"
+  )
+  
+  unlink(lookup_folder, recursive = TRUE)
+  dir.create(lookup_folder, recursive = TRUE)
+  
+  unzip(
+    lookup_zip,
+    exdir = lookup_folder
+  )
+  
+  lookup_csvs <- list.files(
+    lookup_folder,
+    pattern = "\\.csv$",
+    recursive = TRUE,
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+  
+  # Check whether there is another ZIP inside
+  if (length(lookup_csvs) == 0) {
+    
+    nested_zips <- list.files(
+      lookup_folder,
+      pattern = "\\.zip$",
+      recursive = TRUE,
+      full.names = TRUE,
+      ignore.case = TRUE
+    )
+    
+    for (i in seq_along(nested_zips)) {
+      
+      nested_folder <- file.path(
+        lookup_folder,
+        paste0("nested_", i)
+      )
+      
+      dir.create(nested_folder, recursive = TRUE)
+      
+      unzip(
+        nested_zips[i],
+        exdir = nested_folder
+      )
+    }
+    
+    lookup_csvs <- list.files(
+      lookup_folder,
+      pattern = "\\.csv$",
+      recursive = TRUE,
+      full.names = TRUE,
+      ignore.case = TRUE
+    )
+  }
+  
+  if (length(lookup_csvs) == 0) {
+    stop("No postcode lookup CSV was found.")
+  }
+  
+  suitable_lookup <- lookup_csvs[
+    grepl(
+      "NSP21CL|PCD_OA21",
+      basename(lookup_csvs),
+      ignore.case = TRUE
+    )
+  ]
+  
+  if (length(suitable_lookup) > 0) {
+    lookup_file <- suitable_lookup[1]
+  } else {
+    lookup_file <- lookup_csvs[
+      which.max(file.info(lookup_csvs)$size)
+    ]
+  }
+}
+
+# Change a full postcode into a postcode sector
+make_sector <- function(x) {
+  
+  x <- toupper(
+    trimws(
+      gsub("\\s+", " ", x)
+    )
+  )
+  
+  outward <- sub("\\s.*$", "", x)
+  inward <- sub("^.*\\s", "", x)
+  
+  paste(
+    outward,
+    substr(inward, 1, 1)
+  )
+}
+
+# Read the postcode lookup
+lu <- read.csv(
+  lookup_file,
+  stringsAsFactors = FALSE
+)
+
+names(lu) <- tolower(names(lu))
+
+postcode_column <- intersect(
+  c("pcds", "pcd8", "pcd7", "pcd", "postcode"),
+  names(lu)
+)[1]
+
+district_column <- grep(
+  "^lad.*nm$",
+  names(lu),
+  value = TRUE
+)[1]
+
+if (
+  is.na(postcode_column) ||
+  is.na(district_column)
+) {
+  stop("Postcode or district column not found.")
+}
+
+lu_target <- lu %>%
+  transmute(
+    Postcode = .data[[postcode_column]],
+    District = .data[[district_column]]
+  ) %>%
+  filter(District %in% target_districts)
+
+lu_target$Sector <- make_sector(
+  lu_target$Postcode
+)
+
+# Use the main district found in each postcode sector
+sector_lad <- aggregate(
+  District ~ Sector,
+  data = lu_target,
+  FUN = function(x) {
+    names(
+      sort(
+        table(x),
+        decreasing = TRUE
+      )
+    )[1]
+  }
+)
+
+# Read the population data
+pop <- read.csv(
+  population_file,
+  stringsAsFactors = FALSE
+)
+
+names(pop) <- tolower(names(pop))
+
+pop_postcode_column <- grep(
+  "^postcode$|^pcds$|^pcd$",
+  names(pop),
+  value = TRUE
+)[1]
+
+pop_population_column <- grep(
+  "^population$|usual.*resident|all.*person",
+  names(pop),
+  value = TRUE
+)[1]
+
+if (
+  is.na(pop_postcode_column) ||
+  is.na(pop_population_column)
+) {
+  stop("Population columns not found.")
+}
+
+population_data <- pop %>%
+  transmute(
+    Sector = make_sector(
+      .data[[pop_postcode_column]]
+    ),
+    Population = as.numeric(
+      gsub(
+        "[^0-9.-]",
+        "",
+        .data[[pop_population_column]]
+      )
+    )
+  ) %>%
+  filter(!is.na(Population))
+
+# Calculate the population for each district
+district_population <- population_data %>%
+  inner_join(
+    sector_lad,
+    by = "Sector"
+  ) %>%
+  group_by(District) %>%
+  summarise(
+    Population = sum(Population, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Adding the districts together to get each county's population
+county_population <- district_population %>%
+  inner_join(
+    district_info,
+    by = "District"
+  ) %>%
+  group_by(County) %>%
+  summarise(
+    Population = sum(Population, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(county_population)
+
+# Unziping the crime data
+crime_folder <- file.path(
+  tempdir(),
+  "crime_q3"
+)
+
+unlink(crime_folder, recursive = TRUE)
+dir.create(crime_folder, recursive = TRUE)
+
+unzip(
+  crime_zip,
+  exdir = crime_folder
+)
+
+# Finding Norfolk and Suffolk street-crime files
+crime_files <- list.files(
+  crime_folder,
+  pattern = "street\\.csv$",
+  recursive = TRUE,
+  full.names = TRUE,
+  ignore.case = TRUE
+)
+
+crime_file_info <- data.frame(
+  File = crime_files,
+  FileName = basename(crime_files),
+  stringsAsFactors = FALSE
+) %>%
+  mutate(
+    FileMonth = substr(FileName, 1, 7),
+    County = case_when(
+      grepl("norfolk", FileName, ignore.case = TRUE) ~
+        "NORFOLK",
+      grepl("suffolk", FileName, ignore.case = TRUE) ~
+        "SUFFOLK",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(
+    !is.na(County),
+    FileMonth >= "2023-06",
+    FileMonth <= "2026-04"
+  )
+
+if (nrow(crime_file_info) == 0) {
+  stop("No crime files were found for the selected dates.")
+}
+
+# Reading all the monthly files
+crime_data <- bind_rows(
+  lapply(
+    seq_len(nrow(crime_file_info)),
+    function(i) {
+      
+      current_file <- read.csv(
+        crime_file_info$File[i],
+        stringsAsFactors = FALSE
+      )
+      
+      if (
+        !all(
+          c("Month", "Crime.type") %in%
+          names(current_file)
+        )
+      ) {
+        return(NULL)
+      }
+      
+      current_file %>%
+        select(
+          Month,
+          Crime.type
+        ) %>%
+        mutate(
+          County = crime_file_info$County[i]
+        )
+    }
+  )
+)
+
+# Count drug offences each month
+monthly_drug_counts <- crime_data %>%
+  filter(
+    Crime.type == "Drugs"
+  ) %>%
+  mutate(
+    Date = as.Date(
+      paste0(Month, "-01")
+    )
+  ) %>%
+  filter(
+    Date >= as.Date("2023-06-01"),
+    Date <= as.Date("2026-04-01")
+  ) %>%
+  group_by(
+    Date,
+    County
+  ) %>%
+  summarise(
+    Drug_Offences = n(),
+    .groups = "drop"
+  )
+
+# Including every month even when no offence was recorded
+all_months <- expand_grid(
+  Date = seq(
+    as.Date("2023-06-01"),
+    as.Date("2026-04-01"),
+    by = "month"
+  ),
+  County = c("NORFOLK", "SUFFOLK")
+)
+
+monthly_drug_rate <- all_months %>%
+  left_join(
+    monthly_drug_counts,
+    by = c("Date", "County")
+  ) %>%
+  mutate(
+    Drug_Offences = replace_na(
+      Drug_Offences,
+      0
+    )
+  ) %>%
+  left_join(
+    county_population,
+    by = "County"
+  ) %>%
+  mutate(
+    Rate10k = (
+      Drug_Offences /
+        Population
+    ) * 10000
+  )
+
+print(monthly_drug_rate)
+
+# Norfolk chart
+norfolk_chart <- monthly_drug_rate %>%
+  filter(County == "NORFOLK") %>%
+  ggplot(
+    aes(
+      x = Date,
+      y = Rate10k
+    )
+  ) +
+  geom_line(
+    colour = "darkred",
+    linewidth = 1
+  ) +
+  geom_point(
+    colour = "darkred",
+    size = 1.5
+  ) +
+  scale_x_date(
+    date_breaks = "3 months",
+    date_labels = "%b %Y"
+  ) +
+  labs(
+    title = "Drug Offence Rate in Norfolk",
+    subtitle = "June 2023 to April 2026",
+    x = "Month",
+    y = "Drug offences per 10,000 people"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+
+# Suffolk chart
+suffolk_chart <- monthly_drug_rate %>%
+  filter(County == "SUFFOLK") %>%
+  ggplot(
+    aes(
+      x = Date,
+      y = Rate10k
+    )
+  ) +
+  geom_line(
+    colour = "darkblue",
+    linewidth = 1
+  ) +
+  geom_point(
+    colour = "darkblue",
+    size = 1.5
+  ) +
+  scale_x_date(
+    date_breaks = "3 months",
+    date_labels = "%b %Y"
+  ) +
+  labs(
+    title = "Drug Offence Rate in Suffolk",
+    subtitle = "June 2023 to April 2026",
+    x = "Month",
+    y = "Drug offences per 10,000 people"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+
+# Save both charts
+ggsave(
+  file.path(
+    base_folder,
+    "Norfolk_drug_offence_rate.png"
+  ),
+  plot = norfolk_chart,
+  width = 12,
+  height = 7,
+  dpi = 300
+)
+
+ggsave(
+  file.path(
+    base_folder,
+    "Suffolk_drug_offence_rate.png"
+  ),
+  plot = suffolk_chart,
+  width = 12,
+  height = 7,
+  dpi = 300
+)
+print(norfolk_chart)
+print(suffolk_chart)
